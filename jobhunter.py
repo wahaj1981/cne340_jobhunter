@@ -1,3 +1,7 @@
+# Wahaj Al Obid
+# CNE 340
+# Date 02/08/2025
+
 import mysql.connector
 import time
 import json
