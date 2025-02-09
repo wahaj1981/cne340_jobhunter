@@ -11,101 +11,131 @@ import html2text
 
 
 # Connect to database
-# You may need to edit the connect function based on your local settings.#I made a password for my database because it is important to do so. Also make sure MySQL server is running or it will not connect
 def connect_to_sql():
-    conn = mysql.connector.connect(user='root', password='',
-                                   host='127.0.0.1', database='cne340')
+    conn = mysql.connector.connect(
+        user='root',
+        password='',  # Add password if necessary
+        host='127.0.0.1',
+        database='job_hunter',
+        charset='utf8mb4',
+        collation='utf8mb4_unicode_ci'
+    )
     return conn
 
 
 # Create the table structure
 def create_tables(cursor):
-    # Creates table
-    # Must set Title to CHARSET utf8 unicode Source: http://mysql.rjweb.org/doc.php/charcoll.
-    # Python is in latin-1 and error (Incorrect string value: '\xE2\x80\xAFAbi...') will occur if Description is not in unicode format due to the json data
-    cursor.execute('''CREATE TABLE IF NOT EXISTS jobs (id INT PRIMARY KEY auto_increment, Job_id varchar(50) , 
-    company varchar (300), Created_at DATE, url varchar(30000), Title LONGBLOB, Description LONGBLOB ); ''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS jobs (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        job_id VARCHAR(50) UNIQUE,
+        company VARCHAR(300),
+        created_at DATE,
+        url VARCHAR(3000),
+        title TEXT CHARACTER SET utf8 COLLATE utf8_unicode_ci,
+        salary VARCHAR(100),
+        location VARCHAR(300),
+        job_type VARCHAR(100),
+        description TEXT CHARACTER SET utf8 COLLATE utf8_unicode_ci
+    );''')
 
 
 # Query the database.
-# You should not need to edit anything in this function
-def query_sql(cursor, query):
-    cursor.execute(query)
+# You should not need to edit anything in this function.
+
+def query_sql(cursor, query, params=None):
+    cursor.execute(query, params)  # Execute the query with params if provided
     return cursor
 
 
 # Add a new job
 def add_new_job(cursor, jobdetails):
-    # extract all required columns
-    description = html2text.html2text(jobdetails['description'])
-    date = jobdetails['publication_date'][0:10]
-    query = cursor.execute("INSERT INTO jobs( Description, Created_at " ") "
-               "VALUES(%s,%s)", (  description, date))
-     # %s is what is needed for Mysqlconnector as SQLite3 uses ? the Mysqlconnector uses %s
-    return query_sql(cursor, query)
+    job_id = jobdetails.get('id')
+    company = jobdetails.get('company_name', 'Unknown')
+    created_at = jobdetails.get('publication_date', '')[:10]
+    url = jobdetails.get('url', '')
+    title = jobdetails.get('title', 'Unknown')
+    salary = jobdetails.get('salary', 'Not specified')
+    job_type = jobdetails.get('job_type', 'Not specified')
+    location = jobdetails.get('candidate_required_location', 'Not specified')
+    description = html2text.html2text(jobdetails.get('description', ''))
+
+    query = '''
+        INSERT INTO jobs (job_id, company, created_at, url, title, salary, job_type, location, description) 
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE 
+        company = VALUES(company),
+        created_at = VALUES(created_at),
+        url = VALUES(url),
+        title = VALUES(title),
+        salary = VALUES(salary),
+        job_type = VALUES(job_type),
+        location = VALUES(location),
+        description = VALUES(description);
+    '''
+    values = (job_id, company, created_at, url, title, salary, job_type, location, description)
+
+    query_sql(cursor, query, values)  # Pass values as parameters
 
 
-# Check if new job
+# Check if new job exists
 def check_if_job_exists(cursor, jobdetails):
-    ##Add your code here
-    query = "UPDATE"
-    return query_sql(cursor, query)
+    job_id = jobdetails.get('id')
+    company = jobdetails.get('company')
+
+    query = "SELECT 1 FROM jobs WHERE job_id = %s AND company = %s"
+    query_sql(cursor, query, (job_id, company))  # Pass params as a tuple (job_id, company)
+
+    return cursor.fetchone() is not None  # Returns True if job exists, False otherwise
+
 
 # Deletes job
 def delete_job(cursor, jobdetails):
-    ##Add your code here
-    query = "UPDATE"
-    return query_sql(cursor, query)
+    job_id = jobdetails.get('id')
+
+    query = "DELETE FROM jobs WHERE job_id = %s"
+    query_sql(cursor, query, (job_id,))
 
 
-# Grab new jobs from a website, Parses JSON code and inserts the data into a list of dictionaries do not need to edit
+# Grab new jobs from a website, parse JSON code, and insert the data into a list of dictionaries.
 def fetch_new_jobs():
-    query = requests.get("https://remotive.io/api/remote-jobs")
-    datas = json.loads(query.text)
+    query = requests.get("https://remotive.com/api/remote-jobs")  # Updated API endpoint
+    datas = json.loads(query.text)  # Parse the JSON response
+    return datas.get('jobs', [])  # Return the list of jobs
 
-    return datas
 
+# Main area of the code. Should not need to edit.
 
-# Main area of the code. Should not need to edit
 def jobhunt(cursor):
-    # Fetch jobs from website
-    jobpage = fetch_new_jobs()  # Gets API website and holds the json data in it as a list
-    # use below print statement to view list in json format
-    # print(jobpage)
-    add_or_delete_job(jobpage, cursor)
+    jobpage = fetch_new_jobs()  # Fetch new jobs
+    add_or_delete_job(jobpage, cursor)  # Add or delete jobs based on the current database
 
 
+# Add or delete jobs based on API data
 def add_or_delete_job(jobpage, cursor):
-    # Add your code here to parse the job page
-    for jobdetails in jobpage['jobs']:  # EXTRACTS EACH JOB FROM THE JOB LIST. It errored out until I specified jobs. This is because it needs to look at the jobs dictionary from the API. https://careerkarma.com/blog/python-typeerror-int-object-is-not-iterable/
-        # Add in your code here to check if the job already exists in the DB
-        check_if_job_exists(cursor, jobdetails)
-        is_job_found = len(
-        cursor.fetchall()) > 0  # https://stackoverflow.com/questions/2511679/python-number-of-rows-affected-by-cursor-executeselect
-        if is_job_found:
-
+    for jobdetails in jobpage:  # Loop through each job in the list
+        if check_if_job_exists(cursor, jobdetails):  # Check if the job already exists
+            print(f"Job exists: {jobdetails['title']} at {jobdetails['company_name']}")
         else:
-            # INSERT JOB
-            # Add in your code here to notify the user of a new posting. This code will notify the new user
+            print(f"New job found: {jobdetails['title']} at {jobdetails['company_name']}")
+            add_new_job(cursor, jobdetails)
 
 
+# Setup portion of the program. Take arguments and set up the script.
 
-# Setup portion of the program. Take arguments and set up the script
-# You should not need to edit anything here.
 def main():
-    # Important, rest are supporting functions
-    # Connect to SQL and get cursor
     conn = connect_to_sql()
     cursor = conn.cursor()
-    create_tables(cursor)
+    create_tables(cursor)  # Create the necessary tables in the database
 
-    while (1):  # Infinite Loops. Only way to kill it is to crash or manually crash it. We did this as a background process/passive scraper
-        jobhunt(cursor)
-        time.sleep(21600)  # Sleep for 1h, this is ran every hour because API or web interfaces have request limits. Your reqest will get blocked.
+    while True:  # Infinite loop: Runs continuously as a background process
+        try:
+            jobhunt(cursor)  # Fetch jobs and process them
+            conn.commit()  # Commit the changes to the database
+        except Exception as e:
+            print(f"Error occurred: {e}")
+            conn.rollback()  # Rollback if an error occurs
+        time.sleep(14400)  # Sleep for 4 hours
 
 
-# Sleep does a rough cycle count, system is not entirely accurate
-# If you want to test if script works change time.sleep() to 10 seconds and delete your table in MySQL
 if __name__ == '__main__':
     main()
-
