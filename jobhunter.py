@@ -1,5 +1,6 @@
 # Wahaj Al Obid
-# CNE340 Winter 2025
+# CNE340
+# Winter 2025
 
 import mysql.connector
 import time
